@@ -1,22 +1,19 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-import '../main.dart'; // or wherever UserSession is
-
-const String baseUrl = "http://10.0.2.2:5000";
+import '../main.dart';
+import '../services/api_service.dart';
 
 class CustomerBookingsScreen extends StatefulWidget {
   const CustomerBookingsScreen({super.key});
 
   @override
-  State<CustomerBookingsScreen> createState() =>
-      _CustomerBookingsScreenState();
+  State<CustomerBookingsScreen> createState() => _CustomerBookingsScreenState();
 }
 
 class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
-  List bookings = [];
+  List<dynamic> bookings = [];
   bool loading = true;
+  String? errorMessage;
 
   @override
   void initState() {
@@ -26,27 +23,27 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
 
   Future<void> fetchBookings() async {
     try {
-      final customerId = UserSession().currentUser!.id;
+      final currentUser = UserSession().currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
 
-      print(UserSession().currentUser!.id); // ✅ DEBUG
-
-      final response = await http.get(
-        Uri.parse("$baseUrl/api/booking/customer/$customerId"),
-      );
-
-      print("Response: ${response.body}"); // ✅ DEBUG
-
-      bookings = jsonDecode(response.body);
-
-      setState(() {
-        loading = false;
-      });
+      final customerId = currentUser.id;
+      final remoteBookings = await getCustomerBookings(customerId);
+      if (mounted) {
+        setState(() {
+          bookings = remoteBookings;
+          loading = false;
+          errorMessage = null;
+        });
+      }
     } catch (e) {
-      print("ERROR: $e"); // ✅ DEBUG
-
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+          errorMessage = e.toString();
+        });
+      }
     }
   }
 
@@ -64,8 +61,13 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (errorMessage != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("My Bookings")),
+        body: Center(child: Text("Error: $errorMessage")),
       );
     }
 
@@ -74,26 +76,26 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
       body: bookings.isEmpty
           ? const Center(child: Text("No bookings yet"))
           : ListView.builder(
-        itemCount: bookings.length,
-        itemBuilder: (ctx, i) {
-          final b = bookings[i];
+              itemCount: bookings.length,
+              itemBuilder: (ctx, i) {
+                final b = bookings[i];
 
-          return Card(
-            margin: const EdgeInsets.all(10),
-            child: ListTile(
-              title: Text(b["serviceType"]),
-              subtitle: Text("₹${b["price"]}"),
-              trailing: Text(
-                b["status"],
-                style: TextStyle(
-                  color: getStatusColor(b["status"]),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+                return Card(
+                  margin: const EdgeInsets.all(10),
+                  child: ListTile(
+                    title: Text(b["serviceType"] ?? "Unknown Service"),
+                    subtitle: Text("₹${b["price"] ?? "N/A"}"),
+                    trailing: Text(
+                      b["status"] ?? "pending",
+                      style: TextStyle(
+                        color: getStatusColor(b["status"] ?? "pending"),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
     );
   }
 }

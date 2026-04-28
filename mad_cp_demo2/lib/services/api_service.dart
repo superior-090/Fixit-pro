@@ -1,42 +1,190 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-const String baseUrl = "http://10.0.2.2:5000"; // emulator
+/// Set via --dart-define=BASE_URL=https://your-render-service.onrender.com
+String get baseUrl {
+  const configuredUrl = String.fromEnvironment('BASE_URL');
+  if (configuredUrl.isEmpty) {
+    throw StateError(
+      'BASE_URL is required. Build with --dart-define=BASE_URL=https://your-render-service.onrender.com',
+    );
+  }
+  return configuredUrl;
+}
 
-// ================== CREATE BOOKING ==================
-Future<void> createBooking(Map<String, dynamic> data) async {
+Uri apiUri(String path) => Uri.parse('$baseUrl$path');
+
+String? authToken;
+
+void setAuthToken(String? token) {
+  authToken = token;
+}
+
+Map<String, String> get jsonHeaders {
+  return {
+    "Content-Type": "application/json",
+    if (authToken != null && authToken!.isNotEmpty)
+      "Authorization": "Bearer $authToken",
+  };
+}
+
+Future<Map<String, dynamic>> registerUser(Map<String, dynamic> data) async {
   final res = await http.post(
-    Uri.parse("$baseUrl/api/bookings"),
-    headers: {"Content-Type": "application/json"},
+    apiUri('/api/auth/register'),
+    headers: jsonHeaders,
     body: jsonEncode(data),
   );
 
-  print("CREATE BOOKING: ${res.body}");
+  if (res.statusCode != 201) {
+    final body = jsonDecode(res.body);
+    throw Exception(body['message'] ?? 'Registration failed');
+  }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
+
+Future<Map<String, dynamic>> loginUser({
+  required String email,
+  required String password,
+  required String role,
+}) async {
+  final res = await http.post(
+    apiUri('/api/auth/login'),
+    headers: jsonHeaders,
+    body: jsonEncode({"email": email, "password": password, "role": role}),
+  );
+
+  if (res.statusCode != 200) {
+    final body = jsonDecode(res.body);
+    throw Exception(body['message'] ?? 'Login failed');
+  }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
+
+Future<List<dynamic>> getMechanics({
+  String? serviceName,
+  String? state,
+  String? city,
+}) async {
+  final params = <String, String>{};
+  if (serviceName != null && serviceName.isNotEmpty) {
+    params['serviceType'] = serviceName;
+  }
+  if (state != null && state.isNotEmpty) params['state'] = state;
+  if (city != null && city.isNotEmpty) params['city'] = city;
+  final query = params.isEmpty ? '' : '?${Uri(queryParameters: params).query}';
+  final res = await http.get(apiUri('/api/mechanics$query'));
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to fetch mechanics: ${res.statusCode}');
+  }
+
+  return jsonDecode(res.body) as List<dynamic>;
+}
+
+Future<void> upsertMechanic(Map<String, dynamic> data) async {
+  final res = await http.post(
+    apiUri('/api/mechanics'),
+    headers: jsonHeaders,
+    body: jsonEncode(data),
+  );
+
+  if (res.statusCode != 200 && res.statusCode != 201) {
+    throw Exception('Failed to save mechanic: ${res.statusCode}');
+  }
+}
+
+// ================== CREATE BOOKING ==================
+Future<void> createBooking(Map<String, dynamic> data) async {
+  try {
+    final res = await http.post(
+      Uri.parse("$baseUrl/api/bookings"),
+      headers: jsonHeaders,
+      body: jsonEncode(data),
+    );
+
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception('Failed to create booking: ${res.statusCode}');
+    }
+  } catch (e) {
+    rethrow;
+  }
 }
 
 // ================== CUSTOMER BOOKINGS ==================
 Future<List<dynamic>> getCustomerBookings(String userId) async {
-  final res = await http.get(
-    Uri.parse("$baseUrl/api/bookings/customer/$userId"),
-  );
+  try {
+    final res = await http.get(
+      Uri.parse("$baseUrl/api/bookings/customer/$userId"),
+      headers: jsonHeaders,
+    );
 
-  return jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception('Failed to fetch bookings: ${res.statusCode}');
+    }
+
+    return jsonDecode(res.body);
+  } catch (e) {
+    rethrow;
+  }
 }
 
 // ================== MECHANIC BOOKINGS ==================
 Future<List<dynamic>> getMechanicBookings(String mechanicId) async {
-  final res = await http.get(
-    Uri.parse("$baseUrl/api/bookings/mechanic/$mechanicId"),
-  );
+  try {
+    final res = await http.get(
+      Uri.parse("$baseUrl/api/bookings/mechanic/$mechanicId"),
+      headers: jsonHeaders,
+    );
 
-  return jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception('Failed to fetch bookings: ${res.statusCode}');
+    }
+
+    return jsonDecode(res.body);
+  } catch (e) {
+    rethrow;
+  }
 }
 
 // ================== UPDATE STATUS ==================
 Future<void> updateBookingStatus(String id, String status) async {
-  await http.put(
-    Uri.parse("$baseUrl/api/bookings/$id"),
-    headers: {"Content-Type": "application/json"},
-    body: jsonEncode({"status": status}),
+  try {
+    final res = await http.put(
+      Uri.parse("$baseUrl/api/bookings/$id"),
+      headers: jsonHeaders,
+      body: jsonEncode({"status": status}),
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('Failed to update booking: ${res.statusCode}');
+    }
+  } catch (e) {
+    rethrow;
+  }
+}
+
+Future<void> rateMechanic(String bookingId, int rating, String? comment) async {
+  final res = await http.post(
+    apiUri('/api/bookings/$bookingId/rate-mechanic'),
+    headers: jsonHeaders,
+    body: jsonEncode({"rating": rating, "comment": comment}),
   );
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to rate mechanic: ${res.statusCode}');
+  }
+}
+
+Future<void> rateCustomer(String bookingId, int rating, String? comment) async {
+  final res = await http.post(
+    apiUri('/api/bookings/$bookingId/rate-customer'),
+    headers: jsonHeaders,
+    body: jsonEncode({"rating": rating, "comment": comment}),
+  );
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to rate customer: ${res.statusCode}');
+  }
 }
