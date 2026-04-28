@@ -3,13 +3,7 @@ import 'package:http/http.dart' as http;
 
 /// Set via --dart-define=BASE_URL=https://your-render-service.onrender.com
 String get baseUrl {
-  const configuredUrl = String.fromEnvironment('BASE_URL');
-  if (configuredUrl.isEmpty) {
-    throw StateError(
-      'BASE_URL is required. Build with --dart-define=BASE_URL=https://your-render-service.onrender.com',
-    );
-  }
-  return configuredUrl;
+  return "https://fixit-pro-ypjk.onrender.com";
 }
 
 Uri apiUri(String path) => Uri.parse('$baseUrl$path');
