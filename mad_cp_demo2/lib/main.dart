@@ -150,6 +150,7 @@ class UserModel {
   final String? city;
   final int price;
   final double distance;
+  final String? completionCode;
 
   const UserModel({
     required this.id,
@@ -167,6 +168,7 @@ class UserModel {
     this.city,
     this.price = 0,
     this.distance = 0.0,
+    this.completionCode,
   });
 
   UserModel copyWith({
@@ -185,6 +187,7 @@ class UserModel {
     String? city,
     int? price,
     double? distance,
+    String? completionCode,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -202,6 +205,7 @@ class UserModel {
       city: city ?? this.city,
       price: price ?? this.price,
       distance: distance ?? this.distance,
+      completionCode: completionCode ?? this.completionCode,
     );
   }
 
@@ -224,6 +228,7 @@ class UserModel {
       city: json['city']?.toString(),
       price: (json['price'] as num?)?.toInt() ?? 0,
       distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
+      completionCode: json['completionCode']?.toString(),
     );
   }
 }
@@ -343,6 +348,7 @@ enum BookingStatus {
   pending,
   accepted,
   inProgress,
+  verificationPending,
   completed,
   cancelled,
   rejected,
@@ -371,6 +377,10 @@ class BookingModel {
 
   /// When the job was actually completed
   final DateTime? completedAt;
+  final int? customerRating;
+  final String? customerRatingComment;
+  final int? mechanicRating;
+  final String? mechanicRatingComment;
 
   const BookingModel({
     required this.id,
@@ -392,6 +402,10 @@ class BookingModel {
     this.customerPhone,
     this.mechanicPhone,
     this.completedAt,
+    this.customerRating,
+    this.customerRatingComment,
+    this.mechanicRating,
+    this.mechanicRatingComment,
   });
 
   BookingModel copyWith({
@@ -414,6 +428,10 @@ class BookingModel {
     String? customerPhone,
     String? mechanicPhone,
     DateTime? completedAt,
+    int? customerRating,
+    String? customerRatingComment,
+    int? mechanicRating,
+    String? mechanicRatingComment,
   }) {
     return BookingModel(
       id: id ?? this.id,
@@ -435,6 +453,12 @@ class BookingModel {
       customerPhone: customerPhone ?? this.customerPhone,
       mechanicPhone: mechanicPhone ?? this.mechanicPhone,
       completedAt: completedAt ?? this.completedAt,
+      customerRating: customerRating ?? this.customerRating,
+      customerRatingComment:
+          customerRatingComment ?? this.customerRatingComment,
+      mechanicRating: mechanicRating ?? this.mechanicRating,
+      mechanicRatingComment:
+          mechanicRatingComment ?? this.mechanicRatingComment,
     );
   }
 
@@ -446,12 +470,69 @@ class BookingModel {
         return 'Accepted';
       case BookingStatus.inProgress:
         return 'In Progress';
+      case BookingStatus.verificationPending:
+        return 'Awaiting Customer Code';
       case BookingStatus.completed:
         return 'Completed';
       case BookingStatus.cancelled:
         return 'Cancelled';
       case BookingStatus.rejected:
         return 'Rejected';
+    }
+  }
+
+  factory BookingModel.fromJson(Map<String, dynamic> json) {
+    return BookingModel(
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
+      customerId: (json['customerId'] ?? '').toString(),
+      customerName: (json['customerName'] ?? '').toString(),
+      mechanicId: (json['mechanicId'] ?? '').toString(),
+      mechanicName: (json['mechanicName'] ?? '').toString(),
+      serviceId: (json['serviceId'] ?? '').toString(),
+      serviceName: (json['serviceName'] ?? json['serviceType'] ?? '')
+          .toString(),
+      bookingDate: _parseDate(json['bookingDate']),
+      timeSlot: (json['timeSlot'] ?? '').toString(),
+      address: (json['address'] ?? '').toString(),
+      state: (json['state'] ?? '').toString(),
+      city: (json['city'] ?? '').toString(),
+      status: _parseStatus(json['status']),
+      price: (json['price'] as num?)?.toDouble() ?? 0,
+      notes: json['notes']?.toString(),
+      createdAt: _parseDate(json['createdAt']),
+      customerPhone: json['customerPhone']?.toString(),
+      mechanicPhone: json['mechanicPhone']?.toString(),
+      completedAt: json['completedAt'] == null
+          ? null
+          : _parseDate(json['completedAt']),
+      customerRating: (json['customerRating'] as num?)?.toInt(),
+      customerRatingComment: json['customerRatingComment']?.toString(),
+      mechanicRating: (json['mechanicRating'] as num?)?.toInt(),
+      mechanicRatingComment: json['mechanicRatingComment']?.toString(),
+    );
+  }
+
+  static DateTime _parseDate(dynamic value) {
+    if (value == null) return DateTime.now();
+    return DateTime.tryParse(value.toString()) ?? DateTime.now();
+  }
+
+  static BookingStatus _parseStatus(dynamic value) {
+    switch (value?.toString()) {
+      case 'accepted':
+        return BookingStatus.accepted;
+      case 'inProgress':
+        return BookingStatus.inProgress;
+      case 'verificationPending':
+        return BookingStatus.verificationPending;
+      case 'completed':
+        return BookingStatus.completed;
+      case 'cancelled':
+        return BookingStatus.cancelled;
+      case 'rejected':
+        return BookingStatus.rejected;
+      default:
+        return BookingStatus.pending;
     }
   }
 }
@@ -478,6 +559,36 @@ class BookingManager {
   void addBooking(BookingModel booking) {
     _customerBookings.insert(0, booking);
     _mechanicJobRequests.insert(0, booking);
+  }
+
+  void setCustomerBookings(List<BookingModel> bookings) {
+    _customerBookings
+      ..clear()
+      ..addAll(bookings);
+  }
+
+  void setMechanicJobRequests(List<BookingModel> bookings) {
+    _mechanicJobRequests
+      ..clear()
+      ..addAll(bookings);
+  }
+
+  void upsertBooking(BookingModel booking) {
+    final custIndex = _customerBookings.indexWhere((b) => b.id == booking.id);
+    if (custIndex == -1) {
+      _customerBookings.insert(0, booking);
+    } else {
+      _customerBookings[custIndex] = booking;
+    }
+
+    final mechIndex = _mechanicJobRequests.indexWhere(
+      (b) => b.id == booking.id,
+    );
+    if (mechIndex == -1) {
+      _mechanicJobRequests.insert(0, booking);
+    } else {
+      _mechanicJobRequests[mechIndex] = booking;
+    }
   }
 
   String generateBookingId() {
@@ -1069,6 +1180,7 @@ class BookingCard extends StatelessWidget {
   final VoidCallback? onAccept;
   final VoidCallback? onReject;
   final VoidCallback? onComplete;
+  final VoidCallback? onVerifyCompletion;
   final VoidCallback? onRate;
   final VoidCallback? onTap;
 
@@ -1080,6 +1192,7 @@ class BookingCard extends StatelessWidget {
     this.onAccept,
     this.onReject,
     this.onComplete,
+    this.onVerifyCompletion,
     this.onRate,
     this.onTap,
   });
@@ -1092,6 +1205,8 @@ class BookingCard extends StatelessWidget {
         return AppTheme.primaryColor;
       case BookingStatus.inProgress:
         return AppTheme.accentColor;
+      case BookingStatus.verificationPending:
+        return AppTheme.warningColor;
       case BookingStatus.completed:
         return AppTheme.successColor;
       case BookingStatus.cancelled:
@@ -1109,6 +1224,8 @@ class BookingCard extends StatelessWidget {
         return Icons.check_circle_outline;
       case BookingStatus.inProgress:
         return Icons.engineering;
+      case BookingStatus.verificationPending:
+        return Icons.lock_clock;
       case BookingStatus.completed:
         return Icons.task_alt;
       case BookingStatus.cancelled:
@@ -1229,6 +1346,14 @@ class BookingCard extends StatelessWidget {
                       'Mechanic',
                       booking.mechanicName,
                     ),
+                    if (booking.mechanicRating != null) ...[
+                      const SizedBox(height: 6),
+                      _buildInfoRow(
+                        Icons.star,
+                        'Rating',
+                        '${booking.mechanicRating}/5${_commentSuffix(booking.mechanicRatingComment)}',
+                      ),
+                    ],
                     const SizedBox(height: 6),
                   ],
                   if (showCustomerInfo) ...[
@@ -1237,6 +1362,14 @@ class BookingCard extends StatelessWidget {
                       'Customer',
                       booking.customerName,
                     ),
+                    if (booking.customerRating != null) ...[
+                      const SizedBox(height: 6),
+                      _buildInfoRow(
+                        Icons.star,
+                        'Rating',
+                        '${booking.customerRating}/5${_commentSuffix(booking.customerRatingComment)}',
+                      ),
+                    ],
                     const SizedBox(height: 6),
                   ],
                   _buildInfoRow(Icons.calendar_today, 'Date', dateStr),
@@ -1344,6 +1477,27 @@ class BookingCard extends StatelessWidget {
                   ),
                 ),
               ),
+            if (booking.status == BookingStatus.verificationPending &&
+                onVerifyCompletion != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: onVerifyCompletion,
+                    icon: const Icon(Icons.pin_outlined, size: 18),
+                    label: const Text('Enter Completion Code'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.warningColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (booking.status == BookingStatus.completed && onRate != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
@@ -1366,6 +1520,11 @@ class BookingCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _commentSuffix(String? comment) {
+    if (comment == null || comment.trim().isEmpty) return '';
+    return ' • ${comment.trim()}';
   }
 
   Widget _buildInfoRow(IconData icon, String label, String value) {
@@ -2127,6 +2286,32 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   int _currentIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _loadCustomerBookings();
+  }
+
+  Future<void> _loadCustomerBookings() async {
+    final user = UserSession().currentUser;
+    if (user == null) return;
+
+    try {
+      final remoteBookings = await api.getCustomerBookings(user.id);
+      BookingManager().setCustomerBookings(
+        remoteBookings
+            .map(
+              (booking) =>
+                  BookingModel.fromJson(booking as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+      if (mounted) setState(() {});
+    } catch (_) {
+      // The booking tab shows its own API error; keep home usable.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final pages = [
       _buildHomePage(),
@@ -2437,6 +2622,40 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 color: AppTheme.textSecondary,
               ),
             ),
+            if (session.currentUser?.completionCode != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppTheme.warningColor.withOpacity(0.3),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.pin_outlined,
+                      color: AppTheme.warningColor,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Completion Code: ${session.currentUser!.completionCode}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
@@ -3345,11 +3564,14 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _tabs = ['All', 'Pending', 'Accepted', 'Completed'];
+  bool _loading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
+    _loadBookings();
   }
 
   @override
@@ -3358,11 +3580,98 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
     super.dispose();
   }
 
+  Future<void> _loadBookings() async {
+    final user = UserSession().currentUser;
+    if (user == null) {
+      setState(() {
+        _loading = false;
+        _errorMessage = 'User not logged in';
+      });
+      return;
+    }
+
+    try {
+      final remoteBookings = await api.getCustomerBookings(user.id);
+      BookingManager().setCustomerBookings(
+        remoteBookings
+            .map(
+              (booking) =>
+                  BookingModel.fromJson(booking as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = e.toString();
+      });
+    }
+  }
+
+  Future<void> _verifyCompletion(BookingModel booking) async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Confirm Completion'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          maxLength: 4,
+          decoration: const InputDecoration(
+            labelText: '4 digit completion code',
+            prefixIcon: Icon(Icons.pin_outlined),
+            counterText: '',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (code == null || code.length != 4) return;
+
+    try {
+      final updated = await api.verifyBookingCompletion(booking.id, code);
+      BookingManager().upsertBooking(BookingModel.fromJson(updated));
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Verification failed: $e'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
   List<BookingModel> _filter(int i) {
     final b = BookingManager().customerBookings;
     switch (i) {
       case 1:
-        return b.where((x) => x.status == BookingStatus.pending).toList();
+        return b
+            .where(
+              (x) =>
+                  x.status == BookingStatus.pending ||
+                  x.status == BookingStatus.verificationPending,
+            )
+            .toList();
       case 2:
         return b.where((x) => x.status == BookingStatus.accepted).toList();
       case 3:
@@ -3378,15 +3687,26 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: Text(
-              'My Bookings',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'My Bookings',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh',
+                  onPressed: _loadBookings,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             ),
           ),
           Container(
@@ -3411,53 +3731,85 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: List.generate(_tabs.length, (i) {
-                final list = _filter(i);
-                if (list.isEmpty)
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inbox_outlined,
-                          size: 64,
-                          color: AppTheme.textLight.withOpacity(0.5),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No bookings yet',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _errorMessage != null
+                ? Center(child: Text('Error: $_errorMessage'))
+                : RefreshIndicator(
+                    onRefresh: _loadBookings,
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: List.generate(_tabs.length, (i) {
+                        final list = _filter(i);
+                        if (list.isEmpty) {
+                          return ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height:
+                                    MediaQuery.of(context).size.height * 0.45,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.inbox_outlined,
+                                        size: 64,
+                                        color: AppTheme.textLight.withOpacity(
+                                          0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        'No bookings yet',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+                        return ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          itemCount: list.length,
+                          itemBuilder: (ctx, j) {
+                            final booking = list[j];
+                            return BookingCard(
+                              booking: booking,
+                              showMechanicInfo: true,
+                              onVerifyCompletion:
+                                  booking.status ==
+                                      BookingStatus.verificationPending
+                                  ? () => _verifyCompletion(booking)
+                                  : null,
+                              onRate:
+                                  booking.status == BookingStatus.completed &&
+                                      booking.mechanicRating == null
+                                  ? () => showRatingDialog(
+                                      context: context,
+                                      title: 'Rate ${booking.mechanicName}',
+                                      onSubmit: (rating, comment) async {
+                                        await api.rateMechanic(
+                                          booking.id,
+                                          rating,
+                                          comment,
+                                        );
+                                        await _loadBookings();
+                                      },
+                                    )
+                                  : null,
+                            );
+                          },
+                        );
+                      }),
                     ),
-                  );
-                return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  itemCount: list.length,
-                  itemBuilder: (ctx, j) {
-                    final booking = list[j];
-                    return BookingCard(
-                      booking: booking,
-                      showMechanicInfo: true,
-                      onRate: booking.status == BookingStatus.completed
-                          ? () => showRatingDialog(
-                              context: context,
-                              title: 'Rate ${booking.mechanicName}',
-                              onSubmit: (rating, comment) =>
-                                  api.rateMechanic(booking.id, rating, comment),
-                            )
-                          : null,
-                    );
-                  },
-                );
-              }),
-            ),
+                  ),
           ),
         ],
       ),
@@ -3479,6 +3831,32 @@ class MechanicHomeScreen extends StatefulWidget {
 
 class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
   int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMechanicBookings();
+  }
+
+  Future<void> _loadMechanicBookings() async {
+    final user = UserSession().currentUser;
+    if (user == null) return;
+
+    try {
+      final remoteBookings = await api.getMechanicBookings(user.id);
+      BookingManager().setMechanicJobRequests(
+        remoteBookings
+            .map(
+              (booking) =>
+                  BookingModel.fromJson(booking as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+      if (mounted) setState(() {});
+    } catch (_) {
+      // The jobs tab shows its own API error; keep dashboard usable.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4137,17 +4515,54 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _tabs = ['Pending', 'Accepted', 'Completed', 'All'];
+  bool _loading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
+    _loadJobs();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadJobs() async {
+    final user = UserSession().currentUser;
+    if (user == null) {
+      setState(() {
+        _loading = false;
+        _errorMessage = 'User not logged in';
+      });
+      return;
+    }
+
+    try {
+      final remoteBookings = await api.getMechanicBookings(user.id);
+      BookingManager().setMechanicJobRequests(
+        remoteBookings
+            .map(
+              (booking) =>
+                  BookingModel.fromJson(booking as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = e.toString();
+      });
+    }
   }
 
   List<BookingModel> _filter(int i) {
@@ -4165,9 +4580,9 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
   }
 
   Future<void> _acceptJob(BookingModel job) async {
-    await api.updateBookingStatus(job.id, 'accepted');
+    final updated = await api.updateBookingStatus(job.id, 'accepted');
     setState(
-      () => BookingManager().updateJobStatus(job.id, BookingStatus.accepted),
+      () => BookingManager().upsertBooking(BookingModel.fromJson(updated)),
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -4193,11 +4608,10 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
           ),
           ElevatedButton(
             onPressed: () async {
-              await api.updateBookingStatus(job.id, 'rejected');
+              final updated = await api.updateBookingStatus(job.id, 'rejected');
               setState(
-                () => BookingManager().updateJobStatus(
-                  job.id,
-                  BookingStatus.rejected,
+                () => BookingManager().upsertBooking(
+                  BookingModel.fromJson(updated),
                 ),
               );
               Navigator.pop(ctx);
@@ -4258,19 +4672,19 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
           ),
           ElevatedButton.icon(
             onPressed: () async {
-              await api.updateBookingStatus(job.id, 'completed');
-              // This updates status AND sets completedAt timestamp
-              // which makes the earnings calculation pick it up
+              final updated = await api.updateBookingStatus(
+                job.id,
+                'completed',
+              );
               setState(
-                () => BookingManager().updateJobStatus(
-                  job.id,
-                  BookingStatus.completed,
+                () => BookingManager().upsertBooking(
+                  BookingModel.fromJson(updated),
                 ),
               );
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Job completed! ₹${job.price.toInt()} earned'),
+                  content: const Text('Waiting for customer completion code'),
                   backgroundColor: AppTheme.priceColor,
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(
@@ -4296,15 +4710,26 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
-            child: Text(
-              'Job Requests',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Job Requests',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh',
+                  onPressed: _loadJobs,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -4340,64 +4765,90 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: List.generate(_tabs.length, (i) {
-                final jobs = _filter(i);
-                if (jobs.isEmpty)
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inbox_outlined,
-                          size: 64,
-                          color: AppTheme.textLight.withOpacity(0.5),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No jobs found',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _errorMessage != null
+                ? Center(child: Text('Error: $_errorMessage'))
+                : RefreshIndicator(
+                    onRefresh: _loadJobs,
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: List.generate(_tabs.length, (i) {
+                        final jobs = _filter(i);
+                        if (jobs.isEmpty) {
+                          return ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height:
+                                    MediaQuery.of(context).size.height * 0.45,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.inbox_outlined,
+                                        size: 64,
+                                        color: AppTheme.textLight.withOpacity(
+                                          0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        'No jobs found',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+                        return ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          itemCount: jobs.length,
+                          itemBuilder: (ctx, j) {
+                            final job = jobs[j];
+                            return BookingCard(
+                              booking: job,
+                              showMechanicInfo: false,
+                              showCustomerInfo: true,
+                              onAccept: job.status == BookingStatus.pending
+                                  ? () => _acceptJob(job)
+                                  : null,
+                              onReject: job.status == BookingStatus.pending
+                                  ? () => _rejectJob(job)
+                                  : null,
+                              onComplete: job.status == BookingStatus.accepted
+                                  ? () => _completeJob(job)
+                                  : null,
+                              onRate:
+                                  job.status == BookingStatus.completed &&
+                                      job.customerRating == null
+                                  ? () => showRatingDialog(
+                                      context: context,
+                                      title: 'Rate ${job.customerName}',
+                                      onSubmit: (rating, comment) async {
+                                        await api.rateCustomer(
+                                          job.id,
+                                          rating,
+                                          comment,
+                                        );
+                                        await _loadJobs();
+                                      },
+                                    )
+                                  : null,
+                            );
+                          },
+                        );
+                      }),
                     ),
-                  );
-                return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  itemCount: jobs.length,
-                  itemBuilder: (ctx, j) {
-                    final job = jobs[j];
-                    return BookingCard(
-                      booking: job,
-                      showMechanicInfo: false,
-                      showCustomerInfo: true,
-                      onAccept: job.status == BookingStatus.pending
-                          ? () => _acceptJob(job)
-                          : null,
-                      onReject: job.status == BookingStatus.pending
-                          ? () => _rejectJob(job)
-                          : null,
-                      // Complete button for accepted jobs - triggers earnings update
-                      onComplete: job.status == BookingStatus.accepted
-                          ? () => _completeJob(job)
-                          : null,
-                      onRate: job.status == BookingStatus.completed
-                          ? () => showRatingDialog(
-                              context: context,
-                              title: 'Rate ${job.customerName}',
-                              onSubmit: (rating, comment) =>
-                                  api.rateCustomer(job.id, rating, comment),
-                            )
-                          : null,
-                    );
-                  },
-                );
-              }),
-            ),
+                  ),
           ),
         ],
       ),
@@ -4943,6 +5394,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _cityController;
   late final TextEditingController _priceController;
   late String? _serviceType;
+  bool _saving = false;
 
   bool get _isMechanic => widget.user.role == UserRole.mechanic;
 
@@ -4973,8 +5425,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
     final updated = widget.user.copyWith(
       name: _nameController.text.trim(),
       phone: _phoneController.text.trim(),
@@ -4989,8 +5442,37 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ? int.parse(_priceController.text.trim())
           : widget.user.price,
     );
-    UserSession().currentUser = updated;
-    Navigator.pop(context, updated);
+
+    try {
+      UserModel result = updated;
+      if (_isMechanic) {
+        final remote = await api.upsertMechanic({
+          'id': updated.id,
+          'name': updated.name,
+          'email': updated.email,
+          'phone': updated.phone,
+          'serviceType': updated.serviceType,
+          'state': updated.state,
+          'city': updated.city,
+          'address': updated.address,
+          'price': updated.price,
+          'isAvailable': updated.isAvailable,
+        });
+        result = UserModel.fromJson(remote);
+      }
+      UserSession().currentUser = result;
+      if (!mounted) return;
+      Navigator.pop(context, result);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Profile update failed: $e'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 
   @override
@@ -5115,7 +5597,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               CustomButton(
                 text: 'Save Changes',
                 icon: Icons.check_circle_outline,
-                onPressed: _save,
+                isLoading: _saving,
+                onPressed: _saving ? () {} : _save,
               ),
             ],
           ),

@@ -77,7 +77,7 @@ Future<List<dynamic>> getMechanics({
   return jsonDecode(res.body) as List<dynamic>;
 }
 
-Future<void> upsertMechanic(Map<String, dynamic> data) async {
+Future<Map<String, dynamic>> upsertMechanic(Map<String, dynamic> data) async {
   final res = await http.post(
     apiUri('/api/mechanics'),
     headers: jsonHeaders,
@@ -87,6 +87,8 @@ Future<void> upsertMechanic(Map<String, dynamic> data) async {
   if (res.statusCode != 200 && res.statusCode != 201) {
     throw Exception('Failed to save mechanic: ${res.statusCode}');
   }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
 }
 
 // ================== CREATE BOOKING ==================
@@ -143,7 +145,10 @@ Future<List<dynamic>> getMechanicBookings(String mechanicId) async {
 }
 
 // ================== UPDATE STATUS ==================
-Future<void> updateBookingStatus(String id, String status) async {
+Future<Map<String, dynamic>> updateBookingStatus(
+  String id,
+  String status,
+) async {
   try {
     final res = await http.put(
       Uri.parse("$baseUrl/api/bookings/$id"),
@@ -154,6 +159,30 @@ Future<void> updateBookingStatus(String id, String status) async {
     if (res.statusCode != 200) {
       throw Exception('Failed to update booking: ${res.statusCode}');
     }
+
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  } catch (e) {
+    rethrow;
+  }
+}
+
+Future<Map<String, dynamic>> verifyBookingCompletion(
+  String id,
+  String code,
+) async {
+  try {
+    final res = await http.post(
+      apiUri('/api/bookings/$id/verify-completion'),
+      headers: jsonHeaders,
+      body: jsonEncode({"code": code}),
+    );
+
+    if (res.statusCode != 200) {
+      final body = jsonDecode(res.body);
+      throw Exception(body['message'] ?? 'Failed to verify completion');
+    }
+
+    return jsonDecode(res.body) as Map<String, dynamic>;
   } catch (e) {
     rethrow;
   }

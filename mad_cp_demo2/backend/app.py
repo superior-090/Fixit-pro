@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from hashlib import sha256
 
 import jwt
 from flask import Flask, jsonify, request
@@ -38,7 +39,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
-        return {
+        data = {
             "id": self.id,
             "name": self.name,
             "email": self.email,
@@ -50,6 +51,9 @@ class User(db.Model):
             "serviceType": self.service_type,
             "price": self.price,
         }
+        if self.role == "customer":
+            data["completionCode"] = customer_completion_code(self.id)
+        return data
 
 
 class Mechanic(db.Model):
@@ -181,6 +185,39 @@ def apply_average(current_average, current_count, new_rating):
     total = current_average * current_count + new_rating
     count = current_count + 1
     return round(total / count, 2), count
+
+
+def customer_completion_code(customer_id):
+    digest = sha256(str(customer_id).encode("utf-8")).hexdigest()
+    return str(1000 + (int(digest[:8], 16) % 9000))
+
+
+def mechanic_user_payload(user):
+    data = user.to_dict()
+    mechanic = Mechanic.query.get(user.id) if user.role == "mechanic" else None
+    if mechanic:
+        data.update(mechanic.to_dict())
+    return data
+
+
+def refresh_mechanic_stats(mechanic_id):
+    mechanic = Mechanic.query.get(mechanic_id)
+    if not mechanic:
+        return
+
+    completed_count = Booking.query.filter_by(
+        mechanic_id=mechanic_id,
+        status="completed",
+    ).count()
+    ratings = [
+        booking.mechanic_rating
+        for booking in Booking.query.filter_by(mechanic_id=mechanic_id).all()
+        if booking.mechanic_rating is not None
+    ]
+
+    mechanic.jobs_completed = completed_count
+    mechanic.rating_count = len(ratings)
+    mechanic.rating = round(sum(ratings) / len(ratings), 2) if ratings else 0
 
 
 def make_token(user):
@@ -320,7 +357,7 @@ def register():
         db.session.add(mechanic)
 
     db.session.commit()
-    return jsonify({"token": make_token(user), "user": user.to_dict()}), 201
+    return jsonify({"token": make_token(user), "user": mechanic_user_payload(user)}), 201
 
 
 @app.post("/api/auth/login")
@@ -336,7 +373,7 @@ def login():
     if user.role != str(data["role"]):
         return jsonify({"message": "Account role does not match selected role"}), 403
 
-    return jsonify({"token": make_token(user), "user": user.to_dict()})
+    return jsonify({"token": make_token(user), "user": mechanic_user_payload(user)})
 
 
 @app.get("/api/mechanics")
@@ -381,6 +418,17 @@ def upsert_mechanic():
     mechanic.address = data.get("address")
     mechanic.price = int(data["price"])
     mechanic.is_available = bool(data.get("isAvailable", True))
+
+    user = User.query.get(mechanic.id)
+    if user:
+        user.name = mechanic.name
+        user.email = mechanic.email
+        user.phone = mechanic.phone
+        user.service_type = mechanic.service_type
+        user.state = mechanic.state
+        user.city = mechanic.city
+        user.address = mechanic.address
+        user.price = mechanic.price
     db.session.commit()
     return jsonify(mechanic.to_dict()), 201
 
@@ -454,15 +502,41 @@ def mechanic_bookings(mechanic_id):
 def update_booking(booking_id):
     booking = Booking.query.get_or_404(booking_id)
     status = (request.get_json(force=True).get("status") or "").strip()
-    if status not in ["pending", "accepted", "inProgress", "completed", "cancelled", "rejected"]:
+    if status not in ["pending", "accepted", "inProgress", "verificationPending", "completed", "cancelled", "rejected"]:
         return jsonify({"message": "Invalid status"}), 400
 
-    booking.status = status
     if status == "completed":
-        booking.completed_at = datetime.now(timezone.utc)
-        mechanic = Mechanic.query.get(booking.mechanic_id)
-        if mechanic:
-            mechanic.jobs_completed += 1
+        if request.current_user.role != "mechanic" or request.current_user.id != booking.mechanic_id:
+            return jsonify({"message": "Only the assigned mechanic can request completion"}), 403
+        booking.status = "verificationPending"
+        booking.completed_at = None
+    else:
+        booking.status = status
+        if status != "completed":
+            booking.completed_at = None
+
+    refresh_mechanic_stats(booking.mechanic_id)
+    db.session.commit()
+    return jsonify(booking.to_dict())
+
+
+@app.post("/api/bookings/<booking_id>/verify-completion")
+@auth_required
+def verify_completion(booking_id):
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json(force=True)
+    code = str(data.get("code") or "").strip()
+
+    if request.current_user.id != booking.customer_id:
+        return jsonify({"message": "Only the assigned customer can verify completion"}), 403
+    if booking.status != "verificationPending":
+        return jsonify({"message": "This booking is not waiting for customer verification"}), 400
+    if code != customer_completion_code(booking.customer_id):
+        return jsonify({"message": "Invalid completion code"}), 400
+
+    booking.status = "completed"
+    booking.completed_at = datetime.now(timezone.utc)
+    refresh_mechanic_stats(booking.mechanic_id)
     db.session.commit()
     return jsonify(booking.to_dict())
 
@@ -478,9 +552,7 @@ def rate_mechanic(booking_id):
 
     booking.mechanic_rating = rating
     booking.mechanic_rating_comment = data.get("comment")
-    mechanic = Mechanic.query.get(booking.mechanic_id)
-    if mechanic:
-        mechanic.rating, mechanic.rating_count = apply_average(mechanic.rating, mechanic.rating_count, rating)
+    refresh_mechanic_stats(booking.mechanic_id)
     db.session.commit()
     return jsonify(booking.to_dict())
 
