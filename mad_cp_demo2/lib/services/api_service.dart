@@ -56,6 +56,33 @@ Future<Map<String, dynamic>> loginUser({
   return jsonDecode(res.body) as Map<String, dynamic>;
 }
 
+Future<Map<String, dynamic>> getCurrentUser() async {
+  final res = await http.get(apiUri('/api/users/me'), headers: jsonHeaders);
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to fetch profile: ${res.statusCode}');
+  }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
+
+Future<Map<String, dynamic>> updateCurrentUser(
+  Map<String, dynamic> data,
+) async {
+  final res = await http.put(
+    apiUri('/api/users/me'),
+    headers: jsonHeaders,
+    body: jsonEncode(data),
+  );
+
+  if (res.statusCode != 200) {
+    final body = jsonDecode(res.body);
+    throw Exception(body['message'] ?? 'Failed to update profile');
+  }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
+
 Future<List<dynamic>> getMechanics({
   String? serviceName,
   String? state,
@@ -188,7 +215,11 @@ Future<Map<String, dynamic>> verifyBookingCompletion(
   }
 }
 
-Future<void> rateMechanic(String bookingId, int rating, String? comment) async {
+Future<Map<String, dynamic>> rateMechanic(
+  String bookingId,
+  int rating,
+  String? comment,
+) async {
   final res = await http.post(
     apiUri('/api/bookings/$bookingId/rate-mechanic'),
     headers: jsonHeaders,
@@ -198,9 +229,15 @@ Future<void> rateMechanic(String bookingId, int rating, String? comment) async {
   if (res.statusCode != 200) {
     throw Exception('Failed to rate mechanic: ${res.statusCode}');
   }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
 }
 
-Future<void> rateCustomer(String bookingId, int rating, String? comment) async {
+Future<Map<String, dynamic>> rateCustomer(
+  String bookingId,
+  int rating,
+  String? comment,
+) async {
   final res = await http.post(
     apiUri('/api/bookings/$bookingId/rate-customer'),
     headers: jsonHeaders,
@@ -210,4 +247,6 @@ Future<void> rateCustomer(String bookingId, int rating, String? comment) async {
   if (res.statusCode != 200) {
     throw Exception('Failed to rate customer: ${res.statusCode}');
   }
+
+  return jsonDecode(res.body) as Map<String, dynamic>;
 }

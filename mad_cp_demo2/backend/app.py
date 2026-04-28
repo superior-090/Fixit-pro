@@ -39,6 +39,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
+        customer_rating = CustomerRating.query.get(self.id) if self.role == "customer" else None
         data = {
             "id": self.id,
             "name": self.name,
@@ -50,6 +51,8 @@ class User(db.Model):
             "address": self.address,
             "serviceType": self.service_type,
             "price": self.price,
+            "rating": customer_rating.rating if customer_rating else 5,
+            "ratingCount": customer_rating.rating_count if customer_rating else 0,
         }
         if self.role == "customer":
             data["completionCode"] = customer_completion_code(self.id)
@@ -66,7 +69,7 @@ class Mechanic(db.Model):
     state = db.Column(db.String(80), nullable=False)
     city = db.Column(db.String(80), nullable=False)
     address = db.Column(db.Text, nullable=True)
-    rating = db.Column(db.Float, nullable=False, default=0)
+    rating = db.Column(db.Float, nullable=False, default=5)
     rating_count = db.Column(db.Integer, nullable=False, default=0)
     jobs_completed = db.Column(db.Integer, nullable=False, default=0)
     is_available = db.Column(db.Boolean, nullable=False, default=True)
@@ -96,7 +99,7 @@ class Mechanic(db.Model):
 class CustomerRating(db.Model):
     customer_id = db.Column(db.String(120), primary_key=True)
     customer_name = db.Column(db.String(120), nullable=False)
-    rating = db.Column(db.Float, nullable=False, default=0)
+    rating = db.Column(db.Float, nullable=False, default=5)
     rating_count = db.Column(db.Integer, nullable=False, default=0)
 
     def to_dict(self):
@@ -217,7 +220,31 @@ def refresh_mechanic_stats(mechanic_id):
 
     mechanic.jobs_completed = completed_count
     mechanic.rating_count = len(ratings)
-    mechanic.rating = round(sum(ratings) / len(ratings), 2) if ratings else 0
+    mechanic.rating = round(sum(ratings) / len(ratings), 2) if ratings else 5
+
+
+def refresh_customer_stats(customer_id):
+    user = User.query.get(customer_id)
+    if not user:
+        return
+
+    ratings = [
+        booking.customer_rating
+        for booking in Booking.query.filter_by(customer_id=customer_id).all()
+        if booking.customer_rating is not None
+    ]
+
+    customer_rating = CustomerRating.query.get(customer_id)
+    if not customer_rating:
+        customer_rating = CustomerRating(
+            customer_id=customer_id,
+            customer_name=user.name,
+        )
+        db.session.add(customer_rating)
+
+    customer_rating.customer_name = user.name
+    customer_rating.rating_count = len(ratings)
+    customer_rating.rating = round(sum(ratings) / len(ratings), 2) if ratings else 5
 
 
 def make_token(user):
@@ -348,7 +375,7 @@ def register():
             city=user.city,
             address=user.address,
             price=user.price,
-            rating=0,
+            rating=5,
             rating_count=0,
             jobs_completed=0,
             is_available=True,
@@ -374,6 +401,67 @@ def login():
         return jsonify({"message": "Account role does not match selected role"}), 403
 
     return jsonify({"token": make_token(user), "user": mechanic_user_payload(user)})
+
+
+@app.get("/api/users/me")
+@auth_required
+def get_current_user():
+    if request.current_user.role == "mechanic":
+        refresh_mechanic_stats(request.current_user.id)
+        db.session.commit()
+    elif request.current_user.role == "customer":
+        refresh_customer_stats(request.current_user.id)
+        db.session.commit()
+    return jsonify(mechanic_user_payload(request.current_user))
+
+
+@app.put("/api/users/me")
+@auth_required
+def update_current_user():
+    data = request.get_json(force=True)
+    error = require_json_fields(data, ["name", "email", "phone", "state", "city"])
+    if error:
+        return error
+
+    email = normalize(data["email"])
+    existing = User.query.filter_by(email=email).first()
+    if existing and existing.id != request.current_user.id:
+        return jsonify({"message": "Email is already registered"}), 409
+
+    user = request.current_user
+    user.name = str(data["name"]).strip()
+    user.email = email
+    user.phone = str(data["phone"]).strip()
+    user.state = str(data["state"]).strip()
+    user.city = str(data["city"]).strip()
+    user.address = data.get("address")
+
+    if user.role == "mechanic":
+        if not data.get("serviceType"):
+            return jsonify({"message": "Mechanics must select serviceType"}), 400
+        user.service_type = str(data["serviceType"])
+        user.price = int(data.get("price") or 0)
+
+        mechanic = Mechanic.query.get(user.id)
+        if not mechanic:
+            mechanic = Mechanic(id=user.id)
+            db.session.add(mechanic)
+        mechanic.name = user.name
+        mechanic.email = user.email
+        mechanic.phone = user.phone
+        mechanic.role = "mechanic"
+        mechanic.service_type = user.service_type
+        mechanic.state = user.state
+        mechanic.city = user.city
+        mechanic.address = user.address
+        mechanic.price = user.price
+        mechanic.is_available = bool(data.get("isAvailable", mechanic.is_available))
+        refresh_mechanic_stats(user.id)
+    else:
+        refresh_customer_stats(user.id)
+
+    db.session.commit()
+    return jsonify(mechanic_user_payload(user))
 
 
 @app.get("/api/mechanics")
@@ -406,7 +494,7 @@ def upsert_mechanic():
 
     mechanic = Mechanic.query.get(str(data["id"]))
     if not mechanic:
-        mechanic = Mechanic(id=str(data["id"]))
+        mechanic = Mechanic(id=str(data["id"]), rating=5)
         db.session.add(mechanic)
 
     mechanic.name = str(data["name"])
@@ -568,19 +656,7 @@ def rate_customer(booking_id):
 
     booking.customer_rating = rating
     booking.customer_rating_comment = data.get("comment")
-    customer_rating = CustomerRating.query.get(booking.customer_id)
-    if not customer_rating:
-        customer_rating = CustomerRating(
-            customer_id=booking.customer_id,
-            customer_name=booking.customer_name,
-        )
-        db.session.add(customer_rating)
-    customer_rating.customer_name = booking.customer_name
-    customer_rating.rating, customer_rating.rating_count = apply_average(
-        customer_rating.rating,
-        customer_rating.rating_count,
-        rating,
-    )
+    refresh_customer_stats(booking.customer_id)
     db.session.commit()
     return jsonify(booking.to_dict())
 

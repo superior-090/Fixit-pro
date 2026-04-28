@@ -159,7 +159,7 @@ class UserModel {
     required this.phone,
     required this.role,
     this.serviceType,
-    this.rating = 0.0,
+    this.rating = 5.0,
     this.jobsCompleted = 0,
     this.isAvailable = true,
     this.profileImageUrl,
@@ -219,7 +219,7 @@ class UserModel {
           ? UserRole.customer
           : UserRole.mechanic,
       serviceType: json['serviceType']?.toString(),
-      rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
+      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       jobsCompleted: (json['jobsCompleted'] as num?)?.toInt() ?? 0,
       isAvailable: json['isAvailable'] as bool? ?? true,
       profileImageUrl: json['profileImageUrl']?.toString(),
@@ -797,6 +797,13 @@ class UserSession {
     token = jwtToken;
     api.setAuthToken(jwtToken);
   }
+
+  Future<UserModel?> refreshProfile() async {
+    if (currentUser == null) return null;
+    final remote = await api.getCurrentUser();
+    currentUser = UserModel.fromJson(remote);
+    return currentUser;
+  }
 }
 
 // ==========================================================================
@@ -1255,6 +1262,10 @@ class BookingCard extends StatelessWidget {
     final d = booking.bookingDate;
     final dateStr =
         '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]} ${d.year}';
+    final showContactDetails =
+        booking.status != BookingStatus.completed &&
+        booking.status != BookingStatus.cancelled &&
+        booking.status != BookingStatus.rejected;
 
     return GestureDetector(
       onTap: onTap,
@@ -1346,6 +1357,16 @@ class BookingCard extends StatelessWidget {
                       'Mechanic',
                       booking.mechanicName,
                     ),
+                    if (showContactDetails &&
+                        (booking.mechanicPhone?.trim().isNotEmpty ??
+                            false)) ...[
+                      const SizedBox(height: 6),
+                      _buildInfoRow(
+                        Icons.phone_outlined,
+                        'Phone',
+                        booking.mechanicPhone!.trim(),
+                      ),
+                    ],
                     if (booking.mechanicRating != null) ...[
                       const SizedBox(height: 6),
                       _buildInfoRow(
@@ -1362,6 +1383,16 @@ class BookingCard extends StatelessWidget {
                       'Customer',
                       booking.customerName,
                     ),
+                    if (showContactDetails &&
+                        (booking.customerPhone?.trim().isNotEmpty ??
+                            false)) ...[
+                      const SizedBox(height: 6),
+                      _buildInfoRow(
+                        Icons.phone_outlined,
+                        'Phone',
+                        booking.customerPhone!.trim(),
+                      ),
+                    ],
                     if (booking.customerRating != null) ...[
                       const SizedBox(height: 6),
                       _buildInfoRow(
@@ -2296,6 +2327,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     if (user == null) return;
 
     try {
+      await UserSession().refreshProfile();
       final remoteBookings = await api.getCustomerBookings(user.id);
       BookingManager().setCustomerBookings(
         remoteBookings
@@ -2311,6 +2343,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     }
   }
 
+  Future<void> _refreshCurrentData() async {
+    await _loadCustomerBookings();
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -2323,7 +2359,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) {
+          setState(() => _currentIndex = i);
+          _refreshCurrentData();
+        },
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
@@ -2471,88 +2510,102 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 ),
               )
             else
-              ...bookings
-                  .take(3)
-                  .map(
-                    (b) => Container(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 4,
+              ...bookings.take(3).map((b) {
+                final showMechanicPhone =
+                    b.status != BookingStatus.completed &&
+                    b.status != BookingStatus.cancelled &&
+                    b.status != BookingStatus.rejected &&
+                    (b.mechanicPhone?.trim().isNotEmpty ?? false);
+                return Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 4,
+                  ),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: b.status == BookingStatus.completed
+                              ? AppTheme.successColor
+                              : b.status == BookingStatus.pending
+                              ? AppTheme.warningColor
+                              : AppTheme.primaryColor,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
                       ),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 4,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: b.status == BookingStatus.completed
-                                  ? AppTheme.successColor
-                                  : b.status == BookingStatus.pending
-                                  ? AppTheme.warningColor
-                                  : AppTheme.primaryColor,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  b.serviceName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                                Text(
-                                  '${b.mechanicName} • ₹${b.price.toInt()}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color:
-                                  (b.status == BookingStatus.completed
-                                          ? AppTheme.successColor
-                                          : AppTheme.warningColor)
-                                      .withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              b.statusText,
-                              style: TextStyle(
-                                fontSize: 11,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.serviceName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: b.status == BookingStatus.completed
-                                    ? AppTheme.successColor
-                                    : AppTheme.warningColor,
+                                color: AppTheme.textPrimary,
                               ),
                             ),
-                          ),
-                        ],
+                            Text(
+                              '${b.mechanicName} • ₹${b.price.toInt()}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            if (showMechanicPhone)
+                              Text(
+                                b.mechanicPhone!.trim(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primaryColor,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (b.status == BookingStatus.completed
+                                      ? AppTheme.successColor
+                                      : AppTheme.warningColor)
+                                  .withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          b.statusText,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: b.status == BookingStatus.completed
+                                ? AppTheme.successColor
+                                : AppTheme.warningColor,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                );
+              }),
             const SizedBox(height: 30),
           ],
         ),
@@ -2621,6 +2674,22 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 fontSize: 14,
                 color: AppTheme.textSecondary,
               ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.star, color: AppTheme.warningColor, size: 18),
+                const SizedBox(width: 4),
+                Text(
+                  '${(session.currentUser?.rating ?? 5).toStringAsFixed(1)} Customer Rating',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ],
             ),
             if (session.currentUser?.completionCode != null) ...[
               const SizedBox(height: 16),
@@ -3571,6 +3640,9 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) _loadBookings();
+    });
     _loadBookings();
   }
 
@@ -3591,6 +3663,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
     }
 
     try {
+      await UserSession().refreshProfile();
       final remoteBookings = await api.getCustomerBookings(user.id);
       BookingManager().setCustomerBookings(
         remoteBookings
@@ -3795,11 +3868,15 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen>
                                       context: context,
                                       title: 'Rate ${booking.mechanicName}',
                                       onSubmit: (rating, comment) async {
-                                        await api.rateMechanic(
+                                        final updated = await api.rateMechanic(
                                           booking.id,
                                           rating,
                                           comment,
                                         );
+                                        BookingManager().upsertBooking(
+                                          BookingModel.fromJson(updated),
+                                        );
+                                        await UserSession().refreshProfile();
                                         await _loadBookings();
                                       },
                                     )
@@ -3843,6 +3920,7 @@ class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
     if (user == null) return;
 
     try {
+      await UserSession().refreshProfile();
       final remoteBookings = await api.getMechanicBookings(user.id);
       BookingManager().setMechanicJobRequests(
         remoteBookings
@@ -3858,10 +3936,15 @@ class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
     }
   }
 
+  void _goToTab(int i) {
+    setState(() => _currentIndex = i);
+    _loadMechanicBookings();
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _MechanicDashboard(onNavigate: (i) => setState(() => _currentIndex = i)),
+      _MechanicDashboard(onNavigate: _goToTab),
       const JobRequestsScreen(),
       const MechanicProfileScreen(),
     ];
@@ -3870,7 +3953,7 @@ class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: _goToTab,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_outlined),
@@ -4002,45 +4085,49 @@ class _MechanicDashboard extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
+                      Material(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Stack(
-                          children: [
-                            const Center(
-                              child: Icon(
-                                Icons.notifications_outlined,
-                                color: Colors.white,
-                              ),
-                            ),
-                            if (pendingJobs > 0)
-                              Positioned(
-                                top: 6,
-                                right: 6,
-                                child: Container(
-                                  width: 18,
-                                  height: 18,
-                                  decoration: const BoxDecoration(
-                                    color: AppTheme.errorColor,
-                                    shape: BoxShape.circle,
+                          onTap: pendingJobs > 0 ? () => onNavigate(1) : null,
+                          child: SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: Stack(
+                              children: [
+                                const Center(
+                                  child: Icon(
+                                    Icons.notifications_outlined,
+                                    color: Colors.white,
                                   ),
-                                  child: Center(
-                                    child: Text(
-                                      '$pendingJobs',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
+                                ),
+                                if (pendingJobs > 0)
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: const BoxDecoration(
+                                        color: AppTheme.errorColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          '$pendingJobs',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -4424,6 +4511,11 @@ class _MechanicDashboard extends StatelessWidget {
         : job.status == BookingStatus.completed
         ? AppTheme.successColor
         : AppTheme.textLight;
+    final showCustomerPhone =
+        job.status != BookingStatus.completed &&
+        job.status != BookingStatus.cancelled &&
+        job.status != BookingStatus.rejected &&
+        (job.customerPhone?.trim().isNotEmpty ?? false);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       padding: const EdgeInsets.all(14),
@@ -4466,6 +4558,17 @@ class _MechanicDashboard extends StatelessWidget {
                     color: AppTheme.textSecondary,
                   ),
                 ),
+                if (showCustomerPhone)
+                  Text(
+                    job.customerPhone!.trim(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -4522,6 +4625,9 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) _loadJobs();
+    });
     _loadJobs();
   }
 
@@ -4542,6 +4648,7 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
     }
 
     try {
+      await UserSession().refreshProfile();
       final remoteBookings = await api.getMechanicBookings(user.id);
       BookingManager().setMechanicJobRequests(
         remoteBookings
@@ -4834,11 +4941,15 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
                                       context: context,
                                       title: 'Rate ${job.customerName}',
                                       onSubmit: (rating, comment) async {
-                                        await api.rateCustomer(
+                                        final updated = await api.rateCustomer(
                                           job.id,
                                           rating,
                                           comment,
                                         );
+                                        BookingManager().upsertBooking(
+                                          BookingModel.fromJson(updated),
+                                        );
+                                        await UserSession().refreshProfile();
                                         await _loadJobs();
                                       },
                                     )
@@ -4883,11 +4994,44 @@ class _MechanicProfileScreenState extends State<MechanicProfileScreen> {
         );
   }
 
-  void _toggleAvailability(bool v) {
+  Future<void> _toggleAvailability(bool v) async {
+    final previous = _mechanic;
     setState(() {
       _mechanic = _mechanic.copyWith(isAvailable: v);
       UserSession().currentUser = _mechanic;
     });
+    try {
+      final remote = await api.updateCurrentUser({
+        'name': _mechanic.name,
+        'email': _mechanic.email,
+        'phone': _mechanic.phone,
+        'serviceType': _mechanic.serviceType,
+        'state': _mechanic.state,
+        'city': _mechanic.city,
+        'address': _mechanic.address,
+        'price': _mechanic.price,
+        'isAvailable': _mechanic.isAvailable,
+      });
+      final saved = UserModel.fromJson(remote);
+      if (!mounted) return;
+      setState(() {
+        _mechanic = saved;
+        UserSession().currentUser = saved;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _mechanic = previous;
+        UserSession().currentUser = previous;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Availability update failed: $e'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(v ? 'You are now available' : 'You are now offline'),
@@ -4900,6 +5044,10 @@ class _MechanicProfileScreenState extends State<MechanicProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionMechanic = UserSession().currentUser;
+    if (sessionMechanic != null && sessionMechanic.id == _mechanic.id) {
+      _mechanic = sessionMechanic;
+    }
     final totalEarnings = BookingManager().calculateTotalEarnings(_mechanic.id);
     final monthEarnings = BookingManager().calculateMonthEarnings(_mechanic.id);
 
@@ -5444,22 +5592,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
 
     try {
-      UserModel result = updated;
-      if (_isMechanic) {
-        final remote = await api.upsertMechanic({
-          'id': updated.id,
-          'name': updated.name,
-          'email': updated.email,
-          'phone': updated.phone,
-          'serviceType': updated.serviceType,
-          'state': updated.state,
-          'city': updated.city,
-          'address': updated.address,
-          'price': updated.price,
-          'isAvailable': updated.isAvailable,
-        });
-        result = UserModel.fromJson(remote);
-      }
+      final remote = await api.updateCurrentUser({
+        'name': updated.name,
+        'email': updated.email,
+        'phone': updated.phone,
+        'serviceType': updated.serviceType,
+        'state': updated.state,
+        'city': updated.city,
+        'address': updated.address,
+        'price': updated.price,
+        'isAvailable': updated.isAvailable,
+      });
+      final result = UserModel.fromJson(remote);
       UserSession().currentUser = result;
       if (!mounted) return;
       Navigator.pop(context, result);
