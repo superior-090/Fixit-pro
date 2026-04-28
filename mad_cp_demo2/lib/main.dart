@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/api_service.dart' as api;
@@ -2347,6 +2349,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     await _loadCustomerBookings();
   }
 
+  Future<void> _refreshCustomerPage() async {
+    await _loadCustomerBookings();
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -2422,6 +2428,17 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                     style: TextStyle(fontSize: 14, color: Colors.white70),
                   ),
                 ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 12, top: 4),
+                child: IconButton(
+                  tooltip: 'Refresh',
+                  onPressed: _refreshCustomerPage,
+                  icon: const Icon(Icons.refresh),
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -2620,6 +2637,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                tooltip: 'Refresh',
+                onPressed: _refreshCustomerPage,
+                icon: const Icon(Icons.refresh),
+              ),
+            ),
             const SizedBox(height: 20),
             Container(
               width: 100,
@@ -2870,6 +2895,11 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
       appBar: AppBar(
         title: Text(widget.service.name),
         actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadMechanics,
+          ),
           IconButton(
             icon: Icon(
               _showOnlyAvailable ? Icons.filter_alt : Icons.filter_alt_outlined,
@@ -3944,9 +3974,12 @@ class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _MechanicDashboard(onNavigate: _goToTab),
+      _MechanicDashboard(
+        onNavigate: _goToTab,
+        onRefresh: _loadMechanicBookings,
+      ),
       const JobRequestsScreen(),
-      const MechanicProfileScreen(),
+      MechanicProfileScreen(onRefresh: _loadMechanicBookings),
     ];
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBackground,
@@ -3981,7 +4014,8 @@ class _MechanicHomeScreenState extends State<MechanicHomeScreen> {
 /// FIX 2: Earnings are CALCULATED from completed jobs via BookingManager
 class _MechanicDashboard extends StatelessWidget {
   final void Function(int) onNavigate;
-  const _MechanicDashboard({required this.onNavigate});
+  final Future<void> Function() onRefresh;
+  const _MechanicDashboard({required this.onNavigate, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
@@ -4084,6 +4118,11 @@ class _MechanicDashboard extends StatelessWidget {
                             ),
                           ],
                         ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: onRefresh,
+                        icon: const Icon(Icons.refresh, color: Colors.white),
                       ),
                       Material(
                         color: Colors.white.withOpacity(0.2),
@@ -4969,13 +5008,15 @@ class _JobRequestsScreenState extends State<JobRequestsScreen>
 
 /// Mechanic profile screen
 class MechanicProfileScreen extends StatefulWidget {
-  const MechanicProfileScreen({super.key});
+  final Future<void> Function()? onRefresh;
+  const MechanicProfileScreen({super.key, this.onRefresh});
   @override
   State<MechanicProfileScreen> createState() => _MechanicProfileScreenState();
 }
 
 class _MechanicProfileScreenState extends State<MechanicProfileScreen> {
   late UserModel _mechanic;
+  Timer? _profileRefreshTimer;
 
   @override
   void initState() {
@@ -4992,6 +5033,36 @@ class _MechanicProfileScreenState extends State<MechanicProfileScreen> {
           state: 'Maharashtra',
           city: 'Pune',
         );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshProfile());
+    _profileRefreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _refreshProfile(showError: false),
+    );
+  }
+
+  @override
+  void dispose() {
+    _profileRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshProfile({bool showError = true}) async {
+    try {
+      await widget.onRefresh?.call();
+      final fresh = widget.onRefresh == null
+          ? await UserSession().refreshProfile()
+          : UserSession().currentUser;
+      if (!mounted || fresh == null) return;
+      setState(() => _mechanic = fresh);
+    } catch (e) {
+      if (!mounted || !showError) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Refresh failed: $e'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 
   Future<void> _toggleAvailability(bool v) async {
@@ -5055,6 +5126,17 @@ class _MechanicProfileScreenState extends State<MechanicProfileScreen> {
       child: SingleChildScrollView(
         child: Column(
           children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 12, top: 4),
+                child: IconButton(
+                  tooltip: 'Refresh',
+                  onPressed: () => _refreshProfile(),
+                  icon: const Icon(Icons.refresh),
+                ),
+              ),
+            ),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 30, 20, 30),
